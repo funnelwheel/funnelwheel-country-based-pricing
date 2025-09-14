@@ -1,0 +1,77 @@
+# Copyright (C) 2025 FunnelWheel
+# This file is distributed under the GPLv3 or later.
+msgid ""
+msgstr ""
+"Project-Id-Version: FunnelWheel Country Based Pricing 1.0\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/funnelwheel-country-based-pricing\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2025-09-13T18:36:11+00:00\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"X-Generator: WP-CLI 2.11.0\n"
+"X-Domain: funnelwheel-country-based-pricing\n"
+
+#. Plugin Name of the plugin
+#: funnelwheel-country-based-pricing.php
+msgid "FunnelWheel Country Based Pricing"
+msgstr ""
+
+#. Plugin URI of the plugin
+#: funnelwheel-country-based-pricing.php
+msgid "https://github.com/funnelwheel"
+msgstr ""
+
+#. Description of the plugin
+#: funnelwheel-country-based-pricing.php
+msgid "Apply country-specific pricing adjustments in WooCommerce using geolocation, billing address, or store base."
+msgstr ""
+
+#. Author of the plugin
+#: funnelwheel-country-based-pricing.php
+msgid "FunnelWheel"
+msgstr ""
+
+#. Author URI of the plugin
+#: funnelwheel-country-based-pricing.php
+msgid "https://profiles.wordpress.org/funnelwheel/"
+msgstr ""
+
+#: funnelwheel-country-based-pricing.php:125
+msgid "FunnelWheel Country Based Pricing requires WooCommerce to be installed and active."
+msgstr ""
+
+#: includes/class-fwcp-settings-tab.php:12
+msgid "Country Pricing"
+msgstr ""
+
+#: includes/class-fwcp-settings-tab.php:19
+msgid "FunnelWheel Country Discounts"
+msgstr ""
+
+#: includes/class-fwcp-settings-tab.php:21
+msgid "Set discounts by country and type (flat or percent)."
+msgstr ""
+
+#: includes/class-fwcp-settings-tab.php:57
+#: includes/class-fwcp-settings-tab.php:65
+msgid "Amount"
+msgstr ""
+
+#: includes/class-fwcp-settings-tab.php:58
+msgid "Percent"
+msgstr ""
+
+#: includes/class-fwcp-settings-tab.php:63
+msgid "Country"
+msgstr ""
+
+#: includes/class-fwcp-settings-tab.php:64
+msgid "Discount Type"
+msgstr ""
+
+#: includes/class-fwcp-settings-tab.php:125
+msgid "Add Country Discount"
+msgstr ""
