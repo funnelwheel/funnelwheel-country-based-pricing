@@ -3,7 +3,7 @@
  * Plugin Name: FunnelWheel Country Based Pricing
  * Plugin URI:  https://github.com/funnelwheel
  * Description: Apply country-specific pricing adjustments in WooCommerce using geolocation, billing address, or store base.
- * Version:     1.0
+ * Version:     1.0.0
  * Author:      FunnelWheel
  * Author URI:  https://profiles.wordpress.org/funnelwheel/
  * License:     GPLv3 or later
@@ -12,117 +12,299 @@
  * Domain Path: /languages/
  */
 
+namespace FunnelWheel\CountryBasedPricing;
+
 if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-// Load WooCommerce settings tab
-add_filter( 'woocommerce_get_settings_pages', 'funnelwheel_add_settings_tab' );
-function funnelwheel_add_settings_tab( $settings ) {
-    require_once plugin_dir_path( __FILE__ ) . 'includes/class-fwcp-settings-tab.php';
-    $settings[] = new FWCP_Settings_Tab();
+use FunnelWheel\CountryBasedPricing\FUNNCOBA_Settings_Tab;
+
+add_action( 'plugins_loaded', __NAMESPACE__ . '\\funncoba_init' );
+
+function funncoba_init() {
+    if ( ! class_exists( 'WooCommerce' ) ) {
+        add_action( 'admin_notices', __NAMESPACE__ . '\\funncoba_missing_wc_notice' );
+        return;
+    }
+
+    add_filter( 'woocommerce_get_settings_pages', __NAMESPACE__ . '\\funncoba_add_settings_tab' );
+
+    new FUNNCOBA_Main();
+}
+
+function funncoba_missing_wc_notice() {
+    echo '<div class="notice notice-error"><p><strong>' .
+        esc_html__( 'FunnelWheel Country Based Pricing requires WooCommerce to be installed and active.', 'funnelwheel-country-based-pricing' ) .
+        '</strong></p></div>';
+}
+
+function funncoba_add_settings_tab( $settings ) {
+    require_once plugin_dir_path( __FILE__ ) . 'includes/class-funncoba-settings-tab.php';
+    $settings[] = new FUNNCOBA_Settings_Tab();
     return $settings;
 }
 
-class FunnelWheel_Country_Based_Pricing {
+/**
+ * ------------------------------
+ * MAIN CLASS
+ * ------------------------------
+ */
+class FUNNCOBA_Main {
 
     public function __construct() {
-        add_filter( 'woocommerce_product_get_price', [ $this, 'adjust_price_based_on_country' ], 999, 2 );
-        add_filter( 'woocommerce_product_get_regular_price', [ $this, 'adjust_price_based_on_country' ], 999, 2 );
-        add_action( 'init', [ $this, 'ensure_geolocation_enabled' ] );
+        add_filter( 'woocommerce_product_get_regular_price', [ $this, 'get_regular_price' ], 999, 2 );
+        add_filter( 'woocommerce_product_get_sale_price', [ $this, 'get_sale_price' ], 999, 2 );
+        add_filter( 'woocommerce_product_get_price', [ $this, 'get_final_price' ], 999, 2 );
     }
 
-    /**
-     * Adjust product price based on user's country and discount settings.
-     */
-    public function adjust_price_based_on_country( $price, $product ) {
-        $country   = $this->get_user_country();
-        $discounts = get_option( 'fwcp_country_discounts', [] );
+    public function get_regular_price( $price, $product ) {
+        $currency = funncoba_get_currency_for_user();
+        $custom = get_post_meta( $product->get_id(), "_funncoba_regular_price_{$currency}", true );
+        return $custom !== '' ? (float) $custom : (float) $price;
+    }
+
+    public function get_sale_price( $price, $product ) {
+        $currency = funncoba_get_currency_for_user();
+        $custom = get_post_meta( $product->get_id(), "_funncoba_sale_price_{$currency}", true );
+        return $custom !== '' ? (float) $custom : null;
+    }
+
+    public function get_final_price( $price, $product ) {
+        $regular = $this->get_regular_price( $product->get_regular_price(), $product );
+        $sale    = $this->get_sale_price( $product->get_sale_price(), $product );
+
+        $final_price = ($sale !== null && $sale < $regular) ? $sale : $regular;
+
+        // Apply country-specific discount
+        $country = funncoba_get_user_country();
+        $discounts = get_option( 'funncoba_country_discounts', [] );
 
         foreach ( $discounts as $rule ) {
             if ( isset( $rule['country'], $rule['type'], $rule['amount'] ) && $rule['country'] === $country ) {
                 $amount = floatval( $rule['amount'] );
-
                 if ( $rule['type'] === 'percent' ) {
-                    $price -= ( $price * $amount / 100 );
+                    $final_price -= ($final_price * $amount / 100);
                 } else {
-                    $price -= $amount;
+                    $final_price -= $amount;
                 }
-
-                $price = max( 0, $price );
-                break; // Only apply the first matching rule
+                $final_price = max( 0, $final_price );
+                break;
             }
         }
 
-        return $price;
+        return $final_price;
     }
 
-    /**
-     * Get user's country using geolocation, billing, or store base.
-     */
-    private function get_user_country() {
-        $default_location = get_option( 'woocommerce_default_customer_address' );
+}
 
-        // 1. Geolocation (if enabled)
-        if ( in_array( $default_location, [ 'geolocation', 'geolocation_ajax' ], true ) ) {
-            if ( class_exists( 'WC_Geolocation' ) ) {
-                $location = WC_Geolocation::geolocate_ip();
-                if ( ! empty( $location['country'] ) ) {
-                    return $location['country'];
-                }
-            }
+
+register_activation_hook( __FILE__, __NAMESPACE__ . '\\funncoba_set_default_geolocation' );
+
+function funncoba_set_default_geolocation() {
+    $current = get_option( 'woocommerce_default_customer_address', '' );
+    if ( empty( $current ) ) {
+        // Only set default if not already set
+        update_option( 'woocommerce_default_customer_address', 'geolocation_ajax' );
+    }
+}
+
+
+/**
+ * ------------------------------
+ * HELPER FUNCTIONS
+ * ------------------------------
+ */
+
+function funncoba_get_user_country() {
+    if ( class_exists( 'WC_Geolocation' ) ) {
+        $location = \WC_Geolocation::geolocate_ip();
+        if ( ! empty( $location['country'] ) ) {
+            return $location['country'];
         }
-
-        // 2. Billing country (logged-in user)
-        if ( is_user_logged_in() ) {
-            $user_id = get_current_user_id();
-            $billing_country = get_user_meta( $user_id, 'billing_country', true );
-            if ( ! empty( $billing_country ) ) {
-                return $billing_country;
-            }
-        }
-
-        // 3. Billing country (guest in session)
-        if ( WC()->customer ) {
-            $billing_country = WC()->customer->get_billing_country();
-            if ( ! empty( $billing_country ) ) {
-                return $billing_country;
-            }
-        }
-
-        // 4. Store base country (fallback)
-        $base_country = WC()->countries->get_base_country();
-        return ! empty( $base_country ) ? $base_country : '';
     }
 
-    /**
-     * Ensure WooCommerce geolocation is enabled for pricing logic to work.
-     */
-    public function ensure_geolocation_enabled() {
-        $option = get_option( 'woocommerce_default_customer_address' );
-        if ( $option !== 'geolocation_ajax' ) {
-            update_option( 'woocommerce_default_customer_address', 'geolocation_ajax' );
+    if ( is_user_logged_in() ) {
+        $billing = get_user_meta( get_current_user_id(), 'billing_country', true );
+        if ( $billing ) {
+            return $billing;
+        }
+    }
+
+    if ( function_exists( 'WC' ) && WC()->customer ) {
+        $billing = WC()->customer->get_billing_country();
+        if ( $billing ) {
+            return $billing;
+        }
+    }
+
+    return WC()->countries->get_base_country();
+}
+
+/**
+ * Get currency based on country.
+ */
+function funncoba_get_currency_for_country( $country ) {
+    // Admin-defined mapping stored in option
+    $custom_map = get_option( 'funncoba_country_currency_map', [] );
+
+    if ( isset( $custom_map[ $country ] ) ) {
+        return $custom_map[ $country ];
+    }
+
+    // Fallback map (only essential currencies)
+    $fallback = [
+        'US' => 'USD',
+        'CA' => 'CAD',
+        'GB' => 'GBP',
+        'FR' => 'EUR',
+        'DE' => 'EUR',
+        'IN' => 'INR',
+        'AU' => 'AUD',
+        'NZ' => 'NZD',
+        'JP' => 'JPY',
+        'CN' => 'CNY',
+        'BR' => 'BRL',
+        'ZA' => 'ZAR',
+    ];
+
+    return $fallback[ $country ] ?? get_woocommerce_currency();
+}
+
+
+/**
+ * Get user's applicable currency.
+ */
+function funncoba_get_currency_for_user() {
+    $country = funncoba_get_user_country();
+    return funncoba_get_currency_for_country( $country );
+}
+
+/**
+ * Get only enabled/supported currencies.
+ */
+function funncoba_supported_countries() {
+    $enabled = get_option( 'funncoba_enabled_countries', [] );
+
+    if ( empty( $enabled ) ) {
+        $enabled = [ 'US', 'IN', 'GB', 'DE', 'FR', 'NL', 'ES', 'IT', 'AF' ]; // Default list
+    }
+
+    $wc_countries = \WC()->countries->get_countries();
+    $countries = [];
+
+    foreach ( $enabled as $code ) {
+        $countries[ $code ] = $wc_countries[ $code ] ?? $code;
+    }
+
+    return $countries;
+}
+
+
+/**
+ * ------------------------------
+ * COUNTRY-SPECIFIC PRICES SECTION
+ * ------------------------------
+ */
+function funncoba_get_currency_symbol_for_country( $country ) {
+    $custom_map = get_option( 'funncoba_country_currency_symbol_map', [] );
+
+    if ( isset( $custom_map[ $country ] ) ) {
+        return $custom_map[ $country ];
+    }
+
+    $fallback = [
+        'US' => '$',
+        'IN' => '₹',
+        'AF' => '؋',
+        'GB' => '£',
+        'FR' => '€',
+        'DE' => '€',
+        'AU' => 'A$',
+        'NZ' => 'NZ$',
+        'JP' => '¥',
+        'CN' => '¥',
+        'CA' => 'C$',
+        'BR' => 'R$',
+        'ZA' => 'R',
+    ];
+
+    return $fallback[ $country ] ?? '';
+}
+
+
+add_action( 'woocommerce_product_options_pricing', __NAMESPACE__ . '\\funncoba_add_country_specific_prices' );
+function funncoba_add_country_specific_prices() {
+    $countries = funncoba_supported_countries();
+
+    if ( empty( $countries ) ) {
+        return; // nothing to show
+    }
+
+    echo '<div class="options_group funncoba_country_specific_prices">';
+    echo '<h2>' . esc_html__( 'Country-specific prices', 'funnelwheel-country-based-pricing' ) . '</h2>';
+
+    foreach ( $countries as $code => $label ) {
+        $currency_code   = funncoba_get_currency_for_country( $code );
+        $currency_symbol = funncoba_get_currency_symbol_for_country( $code );
+
+        // Skip countries with no currency symbol
+        if ( empty( $currency_symbol ) ) {
+            continue;
+        }
+
+        // Only show fields if needed (optional: you can remove this check if you always want to show)
+        $regular_price = get_post_meta( get_the_ID(), "_funncoba_regular_price_{$currency_code}", true );
+        $sale_price    = get_post_meta( get_the_ID(), "_funncoba_sale_price_{$currency_code}", true );
+
+        // Regular Price
+        echo '<p class="form-field">';
+        echo '<label for="_funncoba_regular_price_' . esc_attr( $currency_code ) . '">' .
+             sprintf( __( 'Regular price (%s)', 'funnelwheel-country-based-pricing' ), esc_html( $currency_symbol ) ) .
+             '</label>';
+        echo '<input type="text" class="short" name="_funncoba_regular_price_' . esc_attr( $currency_code ) . '" id="_funncoba_regular_price_' . esc_attr( $currency_code ) . '" value="' . esc_attr( $regular_price ) . '" />';
+        echo '</p>';
+
+        // Sale Price
+        echo '<p class="form-field">';
+        echo '<label for="_funncoba_sale_price_' . esc_attr( $currency_code ) . '">' .
+             sprintf( __( 'Sale price (%s)', 'funnelwheel-country-based-pricing' ), esc_html( $currency_symbol ) ) .
+             '</label>';
+        echo '<input type="text" class="short" name="_funncoba_sale_price_' . esc_attr( $currency_code ) . '" id="_funncoba_sale_price_' . esc_attr( $currency_code ) . '" value="' . esc_attr( $sale_price ) . '" />';
+        echo '</p>';
+    }
+
+    echo '</div>';
+}
+
+
+add_action( 'woocommerce_admin_process_product_object', __NAMESPACE__ . '\\funncoba_save_country_specific_prices' );
+function funncoba_save_country_specific_prices( $product ) {
+    foreach ( funncoba_supported_countries() as $code => $label ) {
+        $currency = funncoba_get_currency_for_country( $code );
+
+        foreach ( [ 'regular', 'sale' ] as $type ) {
+            $key = "_funncoba_{$type}_price_{$currency}";
+            if ( isset( $_POST[ $key ] ) ) {
+                $product->update_meta_data( $key, wc_clean( wp_unslash( $_POST[ $key ] ) ) );
+            }
         }
     }
 }
 
-// Check if WooCommerce is active
-add_action( 'plugins_loaded', 'funnelwheel_check_woocommerce_dependency' );
 
-function funnelwheel_check_woocommerce_dependency() {
-    if ( ! class_exists( 'WooCommerce' ) ) {
-        add_action( 'admin_notices', 'funnelwheel_woocommerce_missing_notice' );
-        return;
+/**
+ * ------------------------------
+ * DYNAMIC CURRENCY FILTER
+ * ------------------------------
+ */
+add_filter( 'woocommerce_currency', __NAMESPACE__ . '\\funncoba_dynamic_currency' );
+function funncoba_dynamic_currency( $currency ) {
+    if ( is_admin() ) {
+        // Don't change currency in admin
+        return $currency;
     }
 
-    // Initialize the plugin only if WooCommerce is active
-    new FunnelWheel_Country_Based_Pricing();
-}
-
-function funnelwheel_woocommerce_missing_notice() {
-    ?>
-    <div class="notice notice-error">
-        <p><strong><?php esc_html_e( 'FunnelWheel Country Based Pricing requires WooCommerce to be installed and active.', 'funnelwheel-country-based-pricing' ); ?></strong></p>
-    </div>
-    <?php
+    // Frontend: change currency based on user
+    return funncoba_get_currency_for_user();
 }
