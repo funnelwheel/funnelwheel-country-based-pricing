@@ -117,6 +117,19 @@ function funncoba_set_default_geolocation() {
  */
 
 function funncoba_get_user_country() {
+    // Check manual selection first (session or cookie)
+    if ( function_exists( 'WC' ) && WC()->session ) {
+        $manual = WC()->session->get( 'funncoba_selected_country' );
+        if ( $manual ) {
+            return $manual;
+        }
+    }
+
+    if ( ! empty( $_COOKIE['funncoba_selected_country'] ) ) {
+        return sanitize_text_field( $_COOKIE['funncoba_selected_country'] );
+    }
+
+    // Fallback to geolocation or billing country
     if ( class_exists( 'WC_Geolocation' ) ) {
         $location = \WC_Geolocation::geolocate_ip();
         if ( ! empty( $location['country'] ) ) {
@@ -140,6 +153,7 @@ function funncoba_get_user_country() {
 
     return WC()->countries->get_base_country();
 }
+
 
 /**
  * Get currency based on country.
@@ -308,3 +322,125 @@ function funncoba_dynamic_currency( $currency ) {
     // Frontend: change currency based on user
     return funncoba_get_currency_for_user();
 }
+
+
+/**
+ * ------------------------------
+ * FOOTER COUNTRY SELECTOR (Same line as copyright)
+ * ------------------------------
+ */
+add_action( 'wp_footer', __NAMESPACE__ . '\\funncoba_footer_country_selector' );
+function funncoba_footer_country_selector() {
+    if ( is_admin() ) return;
+
+    $countries = funncoba_supported_countries();
+    if ( empty( $countries ) ) return;
+
+    $current_country = funncoba_get_user_country();
+    ?>
+    <style>
+    .funncoba-footer-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        border-top: 1px solid #eaeaea;
+        padding: 12px 20px;
+        font-size: 14px;
+        background: #fafafa;
+        color: #555;
+    }
+    .funncoba-country-selector {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .funncoba-country-selector select {
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        appearance: none;
+        background: transparent url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10"><polygon points="0,0 5,5 10,0" fill="%23555"/></svg>') no-repeat right 6px center;
+        background-size: 10px;
+        padding: 2px 20px 2px 6px;
+        border: none;
+        font-size: 14px;
+        color: inherit;
+        cursor: pointer;
+    }
+    .funncoba-country-selector select:hover {
+        background-color: #f0f0f0;
+        opacity: 1;
+    }
+    @media (max-width: 600px) {
+        .funncoba-footer-bar {
+            flex-direction: column;
+            text-align: center;
+        }
+    }
+    </style>
+
+    <div class="funncoba-footer-bar">
+        <div class="funncoba-country-selector">
+            <form method="post" id="funncoba_country_form_footer" style="margin:0;">
+                <select name="funncoba_country" id="funncoba_country_footer">
+                    <?php foreach ( $countries as $code => $label ) :
+                        $curr = funncoba_get_currency_for_country( $code );
+                        $flag = funncoba_get_country_flag( $code );
+                    ?>
+                        <option value="<?php echo esc_attr( $code ); ?>" <?php selected( $current_country, $code ); ?>>
+                            <?php echo esc_html( "$flag  $label ($curr)" ); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+                <?php wp_nonce_field( 'funncoba_select_country', 'funncoba_nonce' ); ?>
+            </form>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const select = document.getElementById('funncoba_country_footer');
+        const form = document.getElementById('funncoba_country_form_footer');
+        if (select && form) {
+            select.addEventListener('change', function() {
+                form.submit();
+            });
+        }
+    });
+    </script>
+    <?php
+}
+
+/**
+ * Map country code to emoji flag
+ */
+function funncoba_get_country_flag( $country_code ) {
+    if ( empty( $country_code ) ) return '';
+    $code = strtoupper( $country_code );
+    $first  = mb_ord( $code[0] ) - 65 + 0x1F1E6;
+    $second = mb_ord( $code[1] ) - 65 + 0x1F1E6;
+    return mb_chr( $first ) . mb_chr( $second );
+}
+
+
+/**
+ * Handle user country selection
+ */
+add_action( 'init', __NAMESPACE__ . '\\funncoba_handle_country_selection' );
+function funncoba_handle_country_selection() {
+    if ( isset( $_POST['funncoba_country'], $_POST['funncoba_nonce'] ) 
+         && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['funncoba_nonce'] ) ), 'funncoba_select_country' ) ) {
+
+        $country = sanitize_text_field( wp_unslash( $_POST['funncoba_country'] ) );
+
+        if ( function_exists( 'WC' ) && WC()->session ) {
+            WC()->session->set( 'funncoba_selected_country', $country );
+        }
+
+        setcookie( 'funncoba_selected_country', $country, time() + 7 * DAY_IN_SECONDS, COOKIEPATH, COOKIE_DOMAIN );
+
+        wp_safe_redirect( wp_get_referer() ?: home_url() );
+        exit;
+    }
+}
+
