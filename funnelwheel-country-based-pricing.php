@@ -45,6 +45,53 @@ function funncoba_add_settings_tab( $settings ) {
     return $settings;
 }
 
+
+/**
+ * Enqueue plugin assets (admin + frontend)
+ */
+add_action( 'admin_enqueue_scripts', __NAMESPACE__ . '\\funncoba_admin_assets' );
+add_action( 'wp_enqueue_scripts', __NAMESPACE__ . '\\funncoba_public_assets' );
+
+function funncoba_admin_assets( $hook ) {
+    // Load only on WooCommerce settings pages
+    if ( strpos( $hook, 'woocommerce_page_wc-settings' ) === false ) {
+        return;
+    }
+
+    wp_enqueue_style(
+        'funncoba-admin',
+        plugin_dir_url( __FILE__ ) . 'assets/css/admin.css',
+        [],
+        '1.0.0'
+    );
+
+    wp_enqueue_script(
+        'funncoba-admin',
+        plugin_dir_url( __FILE__ ) . 'assets/js/admin.js',
+        [ 'jquery' ],
+        '1.0.0',
+        true
+    );
+}
+
+function funncoba_public_assets() {
+    wp_enqueue_style(
+        'funncoba-public',
+        plugin_dir_url( __FILE__ ) . 'assets/css/public.css',
+        [],
+        '1.0.0'
+    );
+
+    wp_enqueue_script(
+        'funncoba-public',
+        plugin_dir_url( __FILE__ ) . 'assets/js/public.js',
+        [],
+        '1.0.0',
+        true
+    );
+}
+
+
 /**
  * ------------------------------
  * MAIN CLASS
@@ -158,6 +205,7 @@ function funncoba_get_currency_for_country( $country ) {
         'CN' => 'CNY',
         'BR' => 'BRL',
         'ZA' => 'ZAR',
+        'AF' => 'AFN', 
     ];
 
     return $fallback[ $country ] ?? get_woocommerce_currency();
@@ -325,46 +373,6 @@ function funncoba_footer_country_selector() {
 
     $current_country = funncoba_get_user_country();
     ?>
-    <style>
-    .funncoba-footer-bar {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        flex-wrap: wrap;
-        border-top: 1px solid #eaeaea;
-        padding: 12px 20px;
-        font-size: 14px;
-        background: #fafafa;
-        color: #555;
-    }
-    .funncoba-country-selector {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
-    .funncoba-country-selector select {
-        -webkit-appearance: none;
-        -moz-appearance: none;
-        appearance: none;
-        background: transparent url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10"><polygon points="0,0 5,5 10,0" fill="%23555"/></svg>') no-repeat right 6px center;
-        background-size: 10px;
-        padding: 2px 20px 2px 6px;
-        border: none;
-        font-size: 14px;
-        color: inherit;
-        cursor: pointer;
-    }
-    .funncoba-country-selector select:hover {
-        background-color: #f0f0f0;
-        opacity: 1;
-    }
-    @media (max-width: 600px) {
-        .funncoba-footer-bar {
-            flex-direction: column;
-            text-align: center;
-        }
-    }
-    </style>
 
     <div class="funncoba-footer-bar">
         <div class="funncoba-country-selector">
@@ -383,18 +391,6 @@ function funncoba_footer_country_selector() {
             </form>
         </div>
     </div>
-
-    <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        const select = document.getElementById('funncoba_country_footer');
-        const form = document.getElementById('funncoba_country_form_footer');
-        if (select && form) {
-            select.addEventListener('change', function() {
-                form.submit();
-            });
-        }
-    });
-    </script>
     <?php
 }
 
