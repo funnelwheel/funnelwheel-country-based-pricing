@@ -115,9 +115,8 @@ function funncoba_set_default_geolocation() {
  * HELPER FUNCTIONS
  * ------------------------------
  */
-
 function funncoba_get_user_country() {
-    // Check manual selection first (session or cookie)
+    // Manual session selection first
     if ( function_exists( 'WC' ) && WC()->session ) {
         $manual = WC()->session->get( 'funncoba_selected_country' );
         if ( $manual ) {
@@ -129,29 +128,8 @@ function funncoba_get_user_country() {
         return sanitize_text_field( $_COOKIE['funncoba_selected_country'] );
     }
 
-    // Fallback to geolocation or billing country
-    if ( class_exists( 'WC_Geolocation' ) ) {
-        $location = \WC_Geolocation::geolocate_ip();
-        if ( ! empty( $location['country'] ) ) {
-            return $location['country'];
-        }
-    }
-
-    if ( is_user_logged_in() ) {
-        $billing = get_user_meta( get_current_user_id(), 'billing_country', true );
-        if ( $billing ) {
-            return $billing;
-        }
-    }
-
-    if ( function_exists( 'WC' ) && WC()->customer ) {
-        $billing = WC()->customer->get_billing_country();
-        if ( $billing ) {
-            return $billing;
-        }
-    }
-
-    return WC()->countries->get_base_country();
+    // Default store base as fallback
+    return function_exists( 'WC' ) ? WC()->countries->get_base_country() : 'US';
 }
 
 
@@ -314,14 +292,23 @@ function funncoba_save_country_specific_prices( $product ) {
  */
 add_filter( 'woocommerce_currency', __NAMESPACE__ . '\\funncoba_dynamic_currency' );
 function funncoba_dynamic_currency( $currency ) {
+    static $running = false;
+    if ( $running ) {
+        return $currency;
+    }
+    $running = true;
+
     if ( is_admin() ) {
-        // Don't change currency in admin
+        $running = false;
         return $currency;
     }
 
-    // Frontend: change currency based on user
-    return funncoba_get_currency_for_user();
+    $new_currency = funncoba_get_currency_for_user();
+
+    $running = false;
+    return $new_currency ?: $currency;
 }
+
 
 
 /**
@@ -381,7 +368,7 @@ function funncoba_footer_country_selector() {
 
     <div class="funncoba-footer-bar">
         <div class="funncoba-country-selector">
-            <form method="post" id="funncoba_country_form_footer" style="margin:0;">
+            <form method="post" id="funncoba_country_form_footer" action="<?php echo esc_url( $_SERVER['REQUEST_URI'] ); ?>" style="margin:0;">
                 <select name="funncoba_country" id="funncoba_country_footer">
                     <?php foreach ( $countries as $code => $label ) :
                         $curr = funncoba_get_currency_for_country( $code );
@@ -428,19 +415,41 @@ function funncoba_get_country_flag( $country_code ) {
  */
 add_action( 'init', __NAMESPACE__ . '\\funncoba_handle_country_selection' );
 function funncoba_handle_country_selection() {
+
+    // Handle POST only when user selects a country
     if ( isset( $_POST['funncoba_country'], $_POST['funncoba_nonce'] ) 
          && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['funncoba_nonce'] ) ), 'funncoba_select_country' ) ) {
 
+        // Sanitize the country code
         $country = sanitize_text_field( wp_unslash( $_POST['funncoba_country'] ) );
 
+        // Store country in WooCommerce session (if available)
         if ( function_exists( 'WC' ) && WC()->session ) {
             WC()->session->set( 'funncoba_selected_country', $country );
         }
 
-        setcookie( 'funncoba_selected_country', $country, time() + 7 * DAY_IN_SECONDS, COOKIEPATH, COOKIE_DOMAIN );
+        // Store country in cookie for persistence
+        setcookie(
+            'funncoba_selected_country',
+            $country,
+            time() + 7 * DAY_IN_SECONDS,
+            COOKIEPATH,
+            COOKIE_DOMAIN,
+            is_ssl(),
+            true
+        );
 
-        wp_safe_redirect( wp_get_referer() ?: home_url() );
+        // Determine where to redirect
+        $referer = wp_get_referer();
+        $current_url = ! empty( $referer )
+            ? $referer
+            : ( ! empty( $_SERVER['REQUEST_URI'] ) ? esc_url_raw( $_SERVER['REQUEST_URI'] ) : home_url() );
+
+        // Remove WooCommerce cache-busting query vars like ?v=xxxx
+        $redirect_url = remove_query_arg( [ 'v' ], $current_url );
+
+        // Redirect safely back to same page
+        wp_safe_redirect( $redirect_url );
         exit;
     }
 }
-

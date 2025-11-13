@@ -57,10 +57,10 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
             $value = [];
         }
 
-        $enabled = get_option( 'funncoba_enabled_countries', [] );
+        $enabled   = get_option( 'funncoba_enabled_countries', [] );
         $countries = \WC()->countries->get_countries();
 
-        // Only show enabled countries
+        // Filter to enabled countries only
         $filtered = [];
         foreach ( $countries as $code => $label ) {
             if ( in_array( $code, $enabled, true ) ) {
@@ -68,7 +68,7 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
             }
         }
 
-        // Fallback if empty
+        // Fallback if no countries enabled
         if ( empty( $filtered ) ) {
             $filtered = $countries;
         }
@@ -78,7 +78,7 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
             'percent' => esc_html__( 'Percent', 'funnelwheel-country-based-pricing' ),
         ];
 
-        echo '<table class="widefat funncoba-discount-table" style="max-width: 800px;">';
+        echo '<table class="widefat funncoba-discount-table">';
         echo '<thead><tr>
                 <th>' . esc_html__( 'Country', 'funnelwheel-country-based-pricing' ) . '</th>
                 <th>' . esc_html__( 'Discount Type', 'funnelwheel-country-based-pricing' ) . '</th>
@@ -127,29 +127,86 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
 
         echo '</tbody>';
         echo '</table>';
-
         echo '<p><button class="button add-row" type="button">' . esc_html__( 'Add Country Discount', 'funnelwheel-country-based-pricing' ) . '</button></p>';
 
+        // Enhanced JS + CSS
         ?>
+        <style>
+        .funncoba-discount-table {
+            border-collapse: collapse;
+            width: 100%;
+            max-width: 800px;
+            margin-top: 10px;
+        }
+        .funncoba-discount-table th,
+        .funncoba-discount-table td {
+            padding: 8px;
+            vertical-align: middle;
+        }
+        .funncoba-discount-table th {
+            background: #f9f9f9;
+            font-weight: 600;
+        }
+        .funncoba-discount-table tr:nth-child(even) {
+            background: #fcfcfc;
+        }
+        .funncoba-discount-table select,
+        .funncoba-discount-table input[type="number"] {
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .funncoba-discount-table .remove-row {
+            background: transparent;
+            border: none;
+            color: #a00;
+            font-size: 18px;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .funncoba-discount-table .remove-row:hover {
+            color: #d63638;
+        }
+        .add-row {
+            margin-top: 8px;
+        }
+        </style>
+
         <script>
         jQuery(function($) {
-            let table = $('.funncoba-discount-table tbody');
-            $('.add-row').on('click', function(e) {
+            const tableBody = $('.funncoba-discount-table tbody');
+
+            // Add new row
+            $(document).on('click', '.add-row', function(e) {
                 e.preventDefault();
-                let rowCount = table.find('tr').length;
-                let newRow = table.find('tr:last').clone();
+
+                const lastRow = tableBody.find('tr:last');
+                const newRow = lastRow.clone();
+
+                // Reset inputs but preserve select defaults
+                newRow.find('input[type="number"]').val('');
+                newRow.find('select[name*="[country]"]').prop('selectedIndex', 0);
+                newRow.find('select[name*="[type]"]').prop('selectedIndex', 0);
+
+                // Update index names
+                const rowCount = tableBody.find('tr').length;
                 newRow.find('select, input').each(function() {
-                    let name = $(this).attr('name');
-                    name = name.replace(/\[\d+\]/, '[' + rowCount + ']');
+                    const name = $(this).attr('name').replace(/\[\d+\]/, '[' + rowCount + ']');
                     $(this).attr('name', name);
-                    $(this).val('');
                 });
-                table.append(newRow);
+
+                newRow.hide().appendTo(tableBody).fadeIn(150);
             });
-            table.on('click', '.remove-row', function(e) {
+
+            // Remove row but keep at least one
+            $(document).on('click', '.remove-row', function(e) {
                 e.preventDefault();
-                if ( table.find('tr').length > 1 ) {
-                    $(this).closest('tr').remove();
+                const rows = tableBody.find('tr');
+                if (rows.length > 1) {
+                    $(this).closest('tr').fadeOut(150, function() {
+                        $(this).remove();
+                    });
+                } else {
+                    $(this).fadeOut(50).fadeIn(50);
                 }
             });
         });
@@ -183,7 +240,7 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
                 }
             }
 
-            update_option( 'funncoba_country_discounts', $data );
+            update_option( 'funncoba_country_discounts', $data, false );
         }
     }
 }
