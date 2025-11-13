@@ -6,6 +6,8 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
+use FunnelWheel\CountryBasedPricing\FUNNCOBA_Country_Helper;
+
 if ( ! class_exists( 'FUNNCOBA_Settings_Tab' ) ) :
 
 class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
@@ -27,14 +29,15 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
                 'desc' => esc_html__( 'Configure which countries should have custom pricing and set discounts by country.', 'funnelwheel-country-based-pricing' ),
                 'id'   => 'funncoba_settings_section_title',
             ],
+            // Custom multiselect field with label above
             [
-                'name' => esc_html__( 'Enabled Countries', 'funnelwheel-country-based-pricing' ),
-                'type' => 'multiselect',
-                'desc' => esc_html__( 'Select countries where you want to enable custom pricing and discounts.', 'funnelwheel-country-based-pricing' ),
-                'id'   => 'funncoba_enabled_countries',
+                'title'   => esc_html__( 'Enabled Countries', 'funnelwheel-country-based-pricing' ),
+                'desc'    => esc_html__( 'Select countries where you want to enable custom pricing and discounts.', 'funnelwheel-country-based-pricing' ),
+                'id'      => 'funncoba_enabled_countries',
+                'type'    => 'multiselect',
+                'class'   => 'wc-enhanced-select',
+                //'css'     => 'width: 100%; max-width: 800px;', // full width
                 'options' => \WC()->countries->get_countries(),
-                'class' => 'wc-enhanced-select',
-                'css'   => 'min-width: 350px;',
             ],
             [
                 'name' => esc_html__( 'FunnelWheel Country Discounts', 'funnelwheel-country-based-pricing' ),
@@ -51,27 +54,21 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
         return apply_filters( 'woocommerce_get_settings_' . $this->id, $settings );
     }
 
+
     public function render_discount_table_field( $option ) {
         $value = get_option( 'funncoba_country_discounts', [] );
         if ( ! is_array( $value ) ) {
             $value = [];
         }
 
-        $enabled   = get_option( 'funncoba_enabled_countries', [] );
-        $countries = \WC()->countries->get_countries();
-
-        // Filter to enabled countries only
-        $filtered = [];
-        foreach ( $countries as $code => $label ) {
-            if ( in_array( $code, $enabled, true ) ) {
-                $filtered[ $code ] = $label;
-            }
+        // Get only enabled countries
+        $enabled_countries = get_option( 'funncoba_enabled_countries', [] );
+        if ( ! is_array( $enabled_countries ) ) {
+            $enabled_countries = [];
         }
 
-        // Fallback if no countries enabled
-        if ( empty( $filtered ) ) {
-            $filtered = $countries;
-        }
+        $all_countries = FUNNCOBA_Country_Helper::get_country_map();
+        $countries = array_intersect_key( $all_countries, array_flip($enabled_countries) );
 
         $discount_types = [
             'amount'  => esc_html__( 'Amount', 'funnelwheel-country-based-pricing' ),
@@ -92,14 +89,14 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
         }
 
         foreach ( $value as $index => $row ) {
-            $index_attr  = esc_attr( $index );
             $country_val = isset( $row['country'] ) ? esc_attr( $row['country'] ) : '';
             $type_val    = isset( $row['type'] ) ? esc_attr( $row['type'] ) : 'amount';
             $amount_val  = isset( $row['amount'] ) ? esc_attr( $row['amount'] ) : '';
 
             echo '<tr>';
-            echo '<td><select name="funncoba_country_discounts[' . $index_attr . '][country]">';
-            foreach ( $filtered as $code => $label ) {
+            echo '<td><select name="funncoba_country_discounts[' . $index . '][country]">';
+            foreach ( $countries as $code => $data ) {
+                $label = $data['name'] ?? $code;
                 printf(
                     '<option value="%s" %s>%s</option>',
                     esc_attr( $code ),
@@ -109,7 +106,7 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
             }
             echo '</select></td>';
 
-            echo '<td><select name="funncoba_country_discounts[' . $index_attr . '][type]">';
+            echo '<td><select name="funncoba_country_discounts[' . $index . '][type]">';
             foreach ( $discount_types as $key => $label ) {
                 printf(
                     '<option value="%s" %s>%s</option>',
@@ -120,7 +117,7 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
             }
             echo '</select></td>';
 
-            echo '<td><input type="number" step="0.01" min="0" name="funncoba_country_discounts[' . $index_attr . '][amount]" value="' . esc_attr( $amount_val ) . '" /></td>';
+            echo '<td><input type="number" step="0.01" min="0" name="funncoba_country_discounts[' . $index . '][amount]" value="' . esc_attr( $amount_val ) . '" /></td>';
             echo '<td><button class="button remove-row" type="button">×</button></td>';
             echo '</tr>';
         }
@@ -129,84 +126,55 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
         echo '</table>';
         echo '<p><button class="button add-row" type="button">' . esc_html__( 'Add Country Discount', 'funnelwheel-country-based-pricing' ) . '</button></p>';
 
-        // Enhanced JS + CSS
         ?>
         <style>
-        .funncoba-discount-table {
-            border-collapse: collapse;
-            width: 100%;
-            max-width: 800px;
-            margin-top: 10px;
-        }
-        .funncoba-discount-table th,
-        .funncoba-discount-table td {
-            padding: 8px;
-            vertical-align: middle;
-        }
-        .funncoba-discount-table th {
-            background: #f9f9f9;
-            font-weight: 600;
-        }
-        .funncoba-discount-table tr:nth-child(even) {
-            background: #fcfcfc;
-        }
-        .funncoba-discount-table select,
-        .funncoba-discount-table input[type="number"] {
-            width: 100%;
-            box-sizing: border-box;
-        }
-        .funncoba-discount-table .remove-row {
-            background: transparent;
-            border: none;
-            color: #a00;
-            font-size: 18px;
-            line-height: 1;
-            cursor: pointer;
-        }
-        .funncoba-discount-table .remove-row:hover {
-            color: #d63638;
-        }
-        .add-row {
-            margin-top: 8px;
-        }
+        .funncoba-discount-table { border-collapse: collapse; width: 100%; max-width: 800px; margin-top: 10px; }
+        .funncoba-discount-table th, .funncoba-discount-table td { padding: 8px; vertical-align: middle; }
+        .funncoba-discount-table th { background: #f9f9f9; font-weight: 600; }
+        .funncoba-discount-table tr:nth-child(even) { background: #fcfcfc; }
+        .funncoba-discount-table select, .funncoba-discount-table input[type="number"] { width: 100%; box-sizing: border-box; }
+        .funncoba-discount-table .remove-row { background: transparent; border: none; color: #a00; font-size: 18px; line-height: 1; cursor: pointer; }
+        .funncoba-discount-table .remove-row:hover { color: #d63638; }
+        .add-row { margin-top: 8px; }
         </style>
 
         <script>
         jQuery(function($) {
             const tableBody = $('.funncoba-discount-table tbody');
 
-            // Add new row
+            function getNextIndex() {
+                let maxIndex = 0;
+                tableBody.find('tr').each(function() {
+                    $(this).find('select, input').each(function() {
+                        const match = $(this).attr('name').match(/\[(\d+)\]/);
+                        if(match && parseInt(match[1]) > maxIndex) maxIndex = parseInt(match[1]);
+                    });
+                });
+                return maxIndex + 1;
+            }
+
             $(document).on('click', '.add-row', function(e) {
                 e.preventDefault();
-
                 const lastRow = tableBody.find('tr:last');
                 const newRow = lastRow.clone();
 
-                // Reset inputs but preserve select defaults
                 newRow.find('input[type="number"]').val('');
-                newRow.find('select[name*="[country]"]').prop('selectedIndex', 0);
-                newRow.find('select[name*="[type]"]').prop('selectedIndex', 0);
+                newRow.find('select').prop('selectedIndex', 0);
 
-                // Update index names
-                const rowCount = tableBody.find('tr').length;
+                const nextIndex = getNextIndex();
                 newRow.find('select, input').each(function() {
-                    const name = $(this).attr('name').replace(/\[\d+\]/, '[' + rowCount + ']');
+                    const name = $(this).attr('name').replace(/\[\d+\]/, '[' + nextIndex + ']');
                     $(this).attr('name', name);
                 });
 
                 newRow.hide().appendTo(tableBody).fadeIn(150);
             });
 
-            // Remove row but keep at least one
             $(document).on('click', '.remove-row', function(e) {
                 e.preventDefault();
                 const rows = tableBody.find('tr');
                 if (rows.length > 1) {
-                    $(this).closest('tr').fadeOut(150, function() {
-                        $(this).remove();
-                    });
-                } else {
-                    $(this).fadeOut(50).fadeIn(50);
+                    $(this).closest('tr').fadeOut(150, function() { $(this).remove(); });
                 }
             });
         });
@@ -222,7 +190,7 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
             return;
         }
 
-        if ( isset( $_POST['funncoba_country_discounts'] ) && is_array( $_POST['funncoba_country_discounts'] ) ) {
+        if ( ! empty( $_POST['funncoba_country_discounts'] ) && is_array( $_POST['funncoba_country_discounts'] ) ) {
             $raw_data = wp_unslash( $_POST['funncoba_country_discounts'] );
             $data = [];
 
@@ -231,7 +199,7 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
                 $type    = isset( $row['type'] ) ? sanitize_text_field( $row['type'] ) : 'amount';
                 $amount  = isset( $row['amount'] ) ? floatval( $row['amount'] ) : 0;
 
-                if ( $country && in_array( $type, [ 'amount', 'percent' ], true ) && $amount > 0 ) {
+                if ( $country && in_array( $type, ['amount','percent'], true ) ) {
                     $data[] = [
                         'country' => $country,
                         'type'    => $type,
@@ -240,7 +208,7 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
                 }
             }
 
-            update_option( 'funncoba_country_discounts', $data, false );
+            update_option( 'funncoba_country_discounts', array_values($data), false );
         }
     }
 }

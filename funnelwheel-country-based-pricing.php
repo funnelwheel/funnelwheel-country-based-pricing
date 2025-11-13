@@ -18,18 +18,26 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-use FunnelWheel\CountryBasedPricing\FUNNCOBA_Settings_Tab;
-
 add_action( 'plugins_loaded', __NAMESPACE__ . '\\funncoba_init' );
 
+use FunnelWheel\CountryBasedPricing\FUNNCOBA_Settings_Tab;
+use FunnelWheel\CountryBasedPricing\FUNNCOBA_Country_Helper;
+
 function funncoba_init() {
+
+    // Check if WooCommerce is active
     if ( ! class_exists( 'WooCommerce' ) ) {
         add_action( 'admin_notices', __NAMESPACE__ . '\\funncoba_missing_wc_notice' );
         return;
     }
 
+    // Load settings tab
     add_filter( 'woocommerce_get_settings_pages', __NAMESPACE__ . '\\funncoba_add_settings_tab' );
 
+    // Load country helper
+    require_once plugin_dir_path( __FILE__ ) . 'includes/class-funncoba-country-helper.php';
+
+    // Initialize main plugin class
     new FUNNCOBA_Main();
 }
 
@@ -124,7 +132,7 @@ class FUNNCOBA_Main {
         $final_price = ($sale !== null && $sale < $regular) ? $sale : $regular;
 
         // Apply country-specific discount
-        $country = funncoba_get_user_country();
+        $country = FUNNCOBA_Country_Helper::get_user_country();
         $discounts = get_option( 'funncoba_country_discounts', [] );
 
         foreach ( $discounts as $rule ) {
@@ -156,68 +164,12 @@ function funncoba_set_default_geolocation() {
     }
 }
 
-
 /**
- * ------------------------------
- * HELPER FUNCTIONS
- * ------------------------------
- */
-function funncoba_get_user_country() {
-    // Manual session selection first
-    if ( function_exists( 'WC' ) && WC()->session ) {
-        $manual = WC()->session->get( 'funncoba_selected_country' );
-        if ( $manual ) {
-            return $manual;
-        }
-    }
-
-    if ( ! empty( $_COOKIE['funncoba_selected_country'] ) ) {
-        return sanitize_text_field( $_COOKIE['funncoba_selected_country'] );
-    }
-
-    // Default store base as fallback
-    return function_exists( 'WC' ) ? WC()->countries->get_base_country() : 'US';
-}
-
-
-/**
- * Get currency based on country.
- */
-function funncoba_get_currency_for_country( $country ) {
-    // Admin-defined mapping stored in option
-    $custom_map = get_option( 'funncoba_country_currency_map', [] );
-
-    if ( isset( $custom_map[ $country ] ) ) {
-        return $custom_map[ $country ];
-    }
-
-    // Fallback map (only essential currencies)
-    $fallback = [
-        'US' => 'USD',
-        'CA' => 'CAD',
-        'GB' => 'GBP',
-        'FR' => 'EUR',
-        'DE' => 'EUR',
-        'IN' => 'INR',
-        'AU' => 'AUD',
-        'NZ' => 'NZD',
-        'JP' => 'JPY',
-        'CN' => 'CNY',
-        'BR' => 'BRL',
-        'ZA' => 'ZAR',
-        'AF' => 'AFN', 
-    ];
-
-    return $fallback[ $country ] ?? get_woocommerce_currency();
-}
-
-
-/**
- * Get user's applicable currency.
+ * Get user's applicable currency using helper class.
  */
 function funncoba_get_currency_for_user() {
-    $country = funncoba_get_user_country();
-    return funncoba_get_currency_for_country( $country );
+    $country = FUNNCOBA_Country_Helper::get_user_country();
+    return FUNNCOBA_Country_Helper::get_currency_by_country( $country ) ?: 'USD';
 }
 
 /**
@@ -240,39 +192,6 @@ function funncoba_supported_countries() {
     return $countries;
 }
 
-
-/**
- * ------------------------------
- * COUNTRY-SPECIFIC PRICES SECTION
- * ------------------------------
- */
-function funncoba_get_currency_symbol_for_country( $country ) {
-    $custom_map = get_option( 'funncoba_country_currency_symbol_map', [] );
-
-    if ( isset( $custom_map[ $country ] ) ) {
-        return $custom_map[ $country ];
-    }
-
-    $fallback = [
-        'US' => '$',
-        'IN' => '₹',
-        'AF' => '؋',
-        'GB' => '£',
-        'FR' => '€',
-        'DE' => '€',
-        'AU' => 'A$',
-        'NZ' => 'NZ$',
-        'JP' => '¥',
-        'CN' => '¥',
-        'CA' => 'C$',
-        'BR' => 'R$',
-        'ZA' => 'R',
-    ];
-
-    return $fallback[ $country ] ?? '';
-}
-
-
 add_action( 'woocommerce_product_options_pricing', __NAMESPACE__ . '\\funncoba_add_country_specific_prices' );
 function funncoba_add_country_specific_prices() {
     $countries = funncoba_supported_countries();
@@ -285,8 +204,8 @@ function funncoba_add_country_specific_prices() {
     echo '<h2>' . esc_html__( 'Country-specific prices', 'funnelwheel-country-based-pricing' ) . '</h2>';
 
     foreach ( $countries as $code => $label ) {
-        $currency_code   = funncoba_get_currency_for_country( $code );
-        $currency_symbol = funncoba_get_currency_symbol_for_country( $code );
+        $currency_code   = FUNNCOBA_Country_Helper::get_currency_by_country( $code );
+        $currency_symbol = FUNNCOBA_Country_Helper::get_currency_symbol_by_country( $code );
 
         // Skip countries with no currency symbol
         if ( empty( $currency_symbol ) ) {
@@ -321,7 +240,7 @@ function funncoba_add_country_specific_prices() {
 add_action( 'woocommerce_admin_process_product_object', __NAMESPACE__ . '\\funncoba_save_country_specific_prices' );
 function funncoba_save_country_specific_prices( $product ) {
     foreach ( funncoba_supported_countries() as $code => $label ) {
-        $currency = funncoba_get_currency_for_country( $code );
+        $currency = FUNNCOBA_Country_Helper::get_currency_by_country( $code );
 
         foreach ( [ 'regular', 'sale' ] as $type ) {
             $key = "_funncoba_{$type}_price_{$currency}";
@@ -371,7 +290,7 @@ function funncoba_footer_country_selector() {
     $countries = funncoba_supported_countries();
     if ( empty( $countries ) ) return;
 
-    $current_country = funncoba_get_user_country();
+    $current_country = FUNNCOBA_Country_Helper::get_user_country();
     ?>
 
     <div class="funncoba-footer-bar">
@@ -379,8 +298,8 @@ function funncoba_footer_country_selector() {
             <form method="post" id="funncoba_country_form_footer" action="<?php echo esc_url( $_SERVER['REQUEST_URI'] ); ?>" style="margin:0;">
                 <select name="funncoba_country" id="funncoba_country_footer">
                     <?php foreach ( $countries as $code => $label ) :
-                        $curr = funncoba_get_currency_for_country( $code );
-                        $flag = funncoba_get_country_flag( $code );
+                        $curr = FUNNCOBA_Country_Helper::get_currency_by_country( $code );
+                        $flag = FUNNCOBA_Country_Helper::get_flag_by_country( $code );
                     ?>
                         <option value="<?php echo esc_attr( $code ); ?>" <?php selected( $current_country, $code ); ?>>
                             <?php echo esc_html( "$flag  $label ($curr)" ); ?>
@@ -393,18 +312,6 @@ function funncoba_footer_country_selector() {
     </div>
     <?php
 }
-
-/**
- * Map country code to emoji flag
- */
-function funncoba_get_country_flag( $country_code ) {
-    if ( empty( $country_code ) ) return '';
-    $code = strtoupper( $country_code );
-    $first  = mb_ord( $code[0] ) - 65 + 0x1F1E6;
-    $second = mb_ord( $code[1] ) - 65 + 0x1F1E6;
-    return mb_chr( $first ) . mb_chr( $second );
-}
-
 
 /**
  * Handle user country selection
