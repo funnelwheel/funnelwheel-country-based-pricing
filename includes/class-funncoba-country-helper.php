@@ -90,25 +90,30 @@ class FUNNCOBA_Country_Helper {
      * @return string Country code (ISO 2-letter)
      */
     public static function get_user_country() {
-        // WooCommerce geolocation
+        // 1. Check WooCommerce session
+        if ( function_exists('WC') && WC()->session ) {
+            $session_country = WC()->session->get('funncoba_selected_country');
+            if ( $session_country ) return $session_country;
+        }
+
+        // 2. Check cookie
+        if ( isset($_COOKIE['funncoba_selected_country']) ) {
+            return sanitize_text_field($_COOKIE['funncoba_selected_country']);
+        }
+
+        // 3. WooCommerce geolocation
         if ( class_exists( '\WC_Geolocation' ) ) {
             $location = \WC_Geolocation::geolocate_ip();
-            if ( ! empty( $location['country'] ) ) {
-                return $location['country'];
-            }
+            if ( ! empty( $location['country'] ) ) return $location['country'];
         }
 
-        // Fallback: WooCommerce base country
+        // 4. Fallback: store base country
         if ( function_exists('wc_get_base_location') ) {
             $base_location = wc_get_base_location();
-            if ( ! empty( $base_location['country'] ) ) {
-                return $base_location['country'];
-            }
+            if ( ! empty( $base_location['country'] ) ) return $base_location['country'];
         }
 
-        // Ultimate fallback
+        // 5. Ultimate fallback
         return 'US';
     }
-
-
 }

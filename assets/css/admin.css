@@ -1,0 +1,8 @@
+.funncoba-discount-table { border-collapse: collapse; width: 100%; max-width: 800px; margin-top: 10px; }
+.funncoba-discount-table th, .funncoba-discount-table td { padding: 8px; vertical-align: middle; }
+.funncoba-discount-table th { background: #f9f9f9; font-weight: 600; }
+.funncoba-discount-table tr:nth-child(even) { background: #fcfcfc; }
+.funncoba-discount-table select, .funncoba-discount-table input[type="number"] { width: 100%; box-sizing: border-box; }
+.funncoba-discount-table .remove-row { background: transparent; border: none; color: #a00; font-size: 18px; line-height: 1; cursor: pointer; }
+.funncoba-discount-table .remove-row:hover { color: #d63638; }
+.add-row { margin-top: 8px; }
