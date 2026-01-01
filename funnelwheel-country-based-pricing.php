@@ -315,3 +315,37 @@ function funncoba_footer_country_selector() {
     </div>
     <?php
 }
+
+/**
+ * Update header mini-cart via AJAX after add-to-cart.
+ * Only runs if the theme has a .site-header-cart element.
+ * Can be disabled via filter 'funncoba_enable_ajax_mini_cart'.
+ */
+add_filter( 'woocommerce_add_to_cart_fragments', function( $fragments ) {
+
+    // Allow disabling this behavior via filter
+    if ( ! apply_filters( 'funncoba_enable_ajax_mini_cart', true ) ) {
+        return $fragments;
+    }
+
+    // Only run if mini-cart function exists
+    if ( ! function_exists( 'woocommerce_mini_cart' ) ) {
+        return $fragments;
+    }
+
+    // Capture mini-cart HTML
+    ob_start();
+    ?>
+    <div class="site-header-cart">
+        <?php woocommerce_mini_cart(); ?>
+    </div>
+    <?php
+    $mini_cart_html = ob_get_clean();
+
+    // Only add fragment if selector exists in DOM (safer)
+    if ( strpos( $mini_cart_html, 'site-header-cart' ) !== false ) {
+        $fragments['div.site-header-cart'] = $mini_cart_html;
+    }
+
+    return $fragments;
+});

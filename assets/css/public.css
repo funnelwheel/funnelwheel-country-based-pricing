@@ -1,35 +1,71 @@
+/* ----------------------------------------
+   FOOTER COUNTRY SELECTOR – BASE STYLES
+----------------------------------------- */
 .funncoba-footer-bar {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    z-index: 9999;
+
     display: flex;
     justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
-    border-top: 1px solid #eaeaea;
-    padding: 12px 20px;
+
+    padding: 10px 14px;
+
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s ease;
+
     font-size: 14px;
-    background: #fafafa;
     color: #555;
 }
+
+/* When visible after scroll */
+.funncoba-footer-bar.visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* ----------------------------------------
+   SELECT DROPDOWN
+----------------------------------------- */
 .funncoba-country-selector {
     display: flex;
     align-items: center;
     gap: 6px;
 }
+
 .funncoba-country-selector select {
     -webkit-appearance: none;
     -moz-appearance: none;
     appearance: none;
-    background: transparent url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10"><polygon points="0,0 5,5 10,0" fill="%23555"/></svg>') no-repeat right 6px center;
-    background-size: 10px;
-    padding: 2px 20px 2px 6px;
-    border: none;
+
+    padding: 6px 30px 6px 10px;
     font-size: 14px;
     color: inherit;
     cursor: pointer;
+
+    background: transparent url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10"><polygon points="0,0 5,5 10,0" fill="%23555"/></svg>')
+        no-repeat right 10px center;
+    background-size: 10px;
+
+    border: 1px solid #ddd;
+    border-radius: 6px;
 }
+
 .funncoba-country-selector select:hover {
     background-color: #f0f0f0;
-    opacity: 1;
 }
+
+/* ----------------------------------------
+   RESPONSIVE
+----------------------------------------- */
 @media (max-width: 600px) {
     .funncoba-footer-bar {
         flex-direction: column;
