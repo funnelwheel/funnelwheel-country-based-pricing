@@ -212,11 +212,20 @@ function funncoba_add_country_specific_prices() {
         return; // nothing to show
     }
 
+    $base_currency = get_option( 'woocommerce_currency' );
+
     echo '<div class="options_group funncoba_country_specific_prices">';
     echo '<h2>' . esc_html__( 'Country-specific prices', 'funnelwheel-country-based-pricing' ) . '</h2>';
 
     foreach ( $countries as $code => $label ) {
-        $currency_code   = FUNNCOBA_Country_Helper::get_currency_by_country( $code );
+
+        $currency_code = FUNNCOBA_Country_Helper::get_currency_by_country( $code );
+
+        // 🚫 Skip base currency completely
+        if ( ! $currency_code || $currency_code === $base_currency ) {
+            continue;
+        }
+
         $currency_symbol = FUNNCOBA_Country_Helper::get_currency_symbol_by_country( $code );
 
         // Skip countries with no currency symbol
@@ -224,16 +233,23 @@ function funncoba_add_country_specific_prices() {
             continue;
         }
 
-        // Only show fields if needed (optional: you can remove this check if you always want to show)
-        $regular_price = get_post_meta( get_the_ID(), "_funncoba_regular_price_{$currency_code}", true );
-        $sale_price    = get_post_meta( get_the_ID(), "_funncoba_sale_price_{$currency_code}", true );
+        $regular_price = get_post_meta(
+            get_the_ID(),
+            "_funncoba_regular_price_{$currency_code}",
+            true
+        );
+
+        $sale_price = get_post_meta(
+            get_the_ID(),
+            "_funncoba_sale_price_{$currency_code}",
+            true
+        );
 
         // Regular Price
         echo '<p class="form-field">';
         echo '<label for="_funncoba_regular_price_' . esc_attr( $currency_code ) . '">';
         echo esc_html(
             sprintf(
-                /* translators: %s: currency symbol */
                 __( 'Regular price (%s)', 'funnelwheel-country-based-pricing' ),
                 $currency_symbol
             )
@@ -255,7 +271,6 @@ function funncoba_add_country_specific_prices() {
         echo '<label for="_funncoba_sale_price_' . esc_attr( $currency_code ) . '">';
         echo esc_html(
             sprintf(
-                /* translators: %s: currency symbol */
                 __( 'Sale price (%s)', 'funnelwheel-country-based-pricing' ),
                 $currency_symbol
             )
@@ -271,13 +286,11 @@ function funncoba_add_country_specific_prices() {
             value="' . esc_attr( $sale_price ) . '"
         />';
         echo '</p>';
-
-
-
     }
 
     echo '</div>';
 }
+
 
 add_action(
     'woocommerce_admin_process_product_object',

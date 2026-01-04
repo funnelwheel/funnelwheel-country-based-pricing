@@ -5,7 +5,6 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-
 /**
  * ------------------------------
  * MAIN CLASS
@@ -23,11 +22,23 @@ class FUNNCOBA_Main {
     }
 
     /**
+     * Check if current currency is base currency
+     */
+    private function is_base_currency() {
+        return funncoba_get_currency_for_user() === get_option( 'woocommerce_currency' );
+    }
+
+    /**
      * Regular price
      * ✅ Meta-only
      * ❌ No conversion
      */
     public function get_regular_price( $price, $product ) {
+
+        // ✅ Base currency → do nothing
+        if ( $this->is_base_currency() ) {
+            return $price;
+        }
 
         $currency = funncoba_get_currency_for_user();
         $meta_key = "_funncoba_regular_price_{$currency}";
@@ -48,6 +59,11 @@ class FUNNCOBA_Main {
      */
     public function get_sale_price( $price, $product ) {
 
+        // ✅ Base currency → do nothing
+        if ( $this->is_base_currency() ) {
+            return $price;
+        }
+
         $currency = funncoba_get_currency_for_user();
         $meta_key = "_funncoba_sale_price_{$currency}";
 
@@ -60,6 +76,11 @@ class FUNNCOBA_Main {
      * Final price logic
      */
     public function get_final_price( $price, $product ) {
+
+        // ✅ Base currency → do nothing
+        if ( $this->is_base_currency() ) {
+            return $price;
+        }
 
         $regular = $this->get_regular_price(
             $product->get_regular_price(),
@@ -87,6 +108,11 @@ class FUNNCOBA_Main {
      * 🔒 Absolute safety: block purchase if meta missing
      */
     public function is_purchasable( $purchasable, $product ) {
+
+        // ✅ Base currency → allow WooCommerce logic
+        if ( $this->is_base_currency() ) {
+            return $purchasable;
+        }
 
         $currency = funncoba_get_currency_for_user();
         $meta_key = "_funncoba_regular_price_{$currency}";
