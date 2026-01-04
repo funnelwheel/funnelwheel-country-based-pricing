@@ -3,10 +3,10 @@ Contributors: funnelwheel, upnrunn, kishores
 Donate link: https://github.com/funnelwheel
 Tags: woocommerce, pricing, discounts, country based, geolocation
 Requires at least: 5.6
-Tested up to: 6.8
+Tested up to: 6.9
 Requires PHP: 7.2
 Requires Plugins: woocommerce
-Stable tag: 1.0
+Stable tag: 1.0.0
 License: GPLv3 or later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 

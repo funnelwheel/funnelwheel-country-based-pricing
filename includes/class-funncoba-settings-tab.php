@@ -19,6 +19,8 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
 
         add_action( 'woocommerce_admin_field_funncoba_country_discount_table', [ $this, 'render_discount_table_field' ] );
         add_action( 'woocommerce_update_option_funncoba_country_discounts', [ $this, 'save_discount_table_field' ] );
+        add_action( 'woocommerce_admin_field_funncoba_run_price_batch', [ $this, 'render_run_batch_button' ] );
+
     }
 
     public function get_settings() {
@@ -46,11 +48,18 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
                 'id'   => 'funncoba_country_discounts',
             ],
             [
+                'name' => esc_html__( 'Rebuild Country Prices', 'funnelwheel-country-based-pricing' ),
+                'type' => 'funncoba_run_price_batch',
+                'id'   => 'funncoba_run_price_batch',
+                'desc' => esc_html__( 'Generate country prices for all products. Safe to run multiple times.', 'funnelwheel-country-based-pricing' ),
+            ],
+            [
                 'type' => 'sectionend',
                 'id'   => 'funncoba_settings_section_end',
             ],
         ];
 
+        // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound
         return apply_filters( 'woocommerce_get_settings_' . $this->id, $settings );
     }
 
@@ -94,7 +103,7 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
             $amount_val  = isset( $row['amount'] ) ? esc_attr( $row['amount'] ) : '';
 
             echo '<tr>';
-            echo '<td><select name="funncoba_country_discounts[' . $index . '][country]">';
+            echo '<td><select name="funncoba_country_discounts[' . esc_attr( $index ) . '][country]">';
             foreach ( $countries as $code => $data ) {
                 $label = $data['name'] ?? $code;
                 printf(
@@ -106,7 +115,7 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
             }
             echo '</select></td>';
 
-            echo '<td><select name="funncoba_country_discounts[' . $index . '][type]">';
+            echo '<td><select name="funncoba_country_discounts[' . esc_attr( $index ) . '][type]">';
             foreach ( $discount_types as $key => $label ) {
                 printf(
                     '<option value="%s" %s>%s</option>',
@@ -117,7 +126,7 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
             }
             echo '</select></td>';
 
-            echo '<td><input type="number" step="0.01" min="0" name="funncoba_country_discounts[' . $index . '][amount]" value="' . esc_attr( $amount_val ) . '" /></td>';
+            echo '<td><input type="number" step="0.01" min="0" name="funncoba_country_discounts[' . esc_attr( $index ) . '][amount]" value="' . esc_attr( $amount_val ) . '" /></td>';
             echo '<td><button class="button remove-row" type="button">×</button></td>';
             echo '</tr>';
         }
@@ -173,34 +182,97 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
     }
 
     public function save_discount_table_field() {
-        if (
-            ! isset( $_POST['_wpnonce'] ) ||
-            ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['_wpnonce'] ) ), 'woocommerce-settings' )
-        ) {
+        // Verify nonce
+        $nonce = filter_input(INPUT_POST, '_wpnonce', FILTER_UNSAFE_RAW);
+        if ( ! $nonce || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $nonce ) ), 'woocommerce-settings' ) ) {
             return;
         }
 
-        if ( ! empty( $_POST['funncoba_country_discounts'] ) && is_array( $_POST['funncoba_country_discounts'] ) ) {
-            $raw_data = wp_unslash( $_POST['funncoba_country_discounts'] );
-            $data = [];
+        // Get raw POST input safely
+        $raw_data = filter_input(INPUT_POST, 'funncoba_country_discounts', FILTER_UNSAFE_RAW);
+        if ( ! $raw_data ) {
+            return;
+        }
 
-            foreach ( $raw_data as $row ) {
-                $country = isset( $row['country'] ) ? sanitize_text_field( $row['country'] ) : '';
-                $type    = isset( $row['type'] ) ? sanitize_text_field( $row['type'] ) : 'amount';
-                $amount  = isset( $row['amount'] ) ? floatval( $row['amount'] ) : 0;
+        // Unsplash input
+        $raw_data = wp_unslash( $raw_data );
 
-                if ( $country && in_array( $type, ['amount','percent'], true ) ) {
-                    $data[] = [
-                        'country' => $country,
-                        'type'    => $type,
-                        'amount'  => $amount,
-                    ];
-                }
+        // Ensure it's an array
+        $raw_data = is_array( $raw_data ) ? $raw_data : [];
+
+        // Sanitize each row
+        $data = [];
+        foreach ( $raw_data as $row ) {
+            $country = isset( $row['country'] ) ? sanitize_text_field( $row['country'] ) : '';
+            $type    = isset( $row['type'] ) ? sanitize_text_field( $row['type'] ) : 'amount';
+            $amount  = isset( $row['amount'] ) ? floatval( $row['amount'] ) : 0;
+
+            if ( $country && in_array( $type, ['amount','percent'], true ) ) {
+                $data[] = [
+                    'country' => $country,
+                    'type'    => $type,
+                    'amount'  => max( 0, $amount ), // optional: prevent negative discounts
+                ];
+            }
+        }
+
+        update_option( 'funncoba_country_discounts', array_values( $data ), false );
+    }
+
+    /**
+     * ------------------------------
+     * RUN BATCH BUTTON
+     * ------------------------------
+     */
+    public function render_run_batch_button( $option ) {
+
+        $url = wp_nonce_url(
+            admin_url(
+                'admin.php?page=wc-settings&tab=' . $this->id . '&funncoba_run_batch=1'
+            ),
+            'funncoba_run_batch'
+        );
+        ?>
+        <tr valign="top">
+            <th scope="row">
+                <?php echo esc_html( $option['name'] ); ?>
+            </th>
+            <td>
+                <div class="funncoba-batch-box">
+                    <p>
+                        <?php echo esc_html( $option['desc'] ); ?>
+                    </p>
+
+                    <a href="<?php echo esc_url( $url ); ?>"
+                       class="button button-primary funncoba-run-batch">
+                        🔄 <?php esc_html_e( 'Run Price Batch', 'funnelwheel-country-based-pricing' ); ?>
+                    </a>
+
+                    <p class="description">
+                        <?php esc_html_e(
+                            'This will generate or update country prices for all products. You can safely run this multiple times.',
+                            'funnelwheel-country-based-pricing'
+                        ); ?>
+                    </p>
+                </div>
+            </td>
+        </tr>
+
+        <style>
+            .funncoba-batch-box {
+                background: #fff;
+                border: 1px solid #ccd0d4;
+                padding: 16px;
+                max-width: 520px;
             }
 
-            update_option( 'funncoba_country_discounts', array_values($data), false );
-        }
+            .funncoba-run-batch {
+                margin-top: 6px;
+            }
+        </style>
+        <?php
     }
+
 }
 
 endif;

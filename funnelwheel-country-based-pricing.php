@@ -13,6 +13,9 @@
  */
 
 namespace FunnelWheel\CountryBasedPricing;
+use FunnelWheel\CountryBasedPricing\FUNNCOBA_Settings_Tab;
+use FunnelWheel\CountryBasedPricing\FUNNCOBA_Country_Helper;
+
 
 if ( ! defined( 'ABSPATH' ) ) {
     exit;
@@ -20,8 +23,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 add_action( 'plugins_loaded', __NAMESPACE__ . '\\funncoba_init' );
 
-use FunnelWheel\CountryBasedPricing\FUNNCOBA_Settings_Tab;
-use FunnelWheel\CountryBasedPricing\FUNNCOBA_Country_Helper;
 
 function funncoba_init() {
 
@@ -33,15 +34,27 @@ function funncoba_init() {
     // Load settings tab
     add_filter( 'woocommerce_get_settings_pages', __NAMESPACE__ . '\\funncoba_add_settings_tab' );
 
-    // Load helper
+    // Core helpers (safe early)
+    require_once plugin_dir_path( __FILE__ ) . 'includes/class-funncoba-main.php';
     require_once plugin_dir_path( __FILE__ ) . 'includes/class-funncoba-country-helper.php';
-
-    // ✅ Load country handler for POST requests
+    require_once plugin_dir_path( __FILE__ ) . 'includes/class-funncoba-currency-rates.php';
     require_once plugin_dir_path( __FILE__ ) . 'includes/funncoba-country-handler.php';
+
+    // Delay batch + main logic until WooCommerce is ready
+    add_action( 'woocommerce_loaded', __NAMESPACE__ . '\\funncoba_boot_after_wc', 20 );
 
     // Initialize main class
     new FUNNCOBA_Main();
 }
+
+function funncoba_boot_after_wc() {
+
+    require_once plugin_dir_path( __FILE__ ) . 'includes/class-funncoba-price-batch.php';
+
+    // Init batch hooks (Action Scheduler is now available)
+    FUNNCOBA_Price_Batch::init();
+}
+
 
 
 function funncoba_missing_wc_notice() {
@@ -103,61 +116,57 @@ function funncoba_public_assets() {
 }
 
 
-/**
- * ------------------------------
- * MAIN CLASS
- * ------------------------------
- */
-class FUNNCOBA_Main {
+register_activation_hook( __FILE__, __NAMESPACE__ . '\\funncoba_set_default_geolocation' );
+add_action( 'woocommerce_loaded', __NAMESPACE__ . '\\funncoba_schedule_price_batch_once', 20 );
 
-    public function __construct() {
-        add_filter( 'woocommerce_product_get_regular_price', [ $this, 'get_regular_price' ], 999, 2 );
-        add_filter( 'woocommerce_product_get_sale_price', [ $this, 'get_sale_price' ], 999, 2 );
-        add_filter( 'woocommerce_product_get_price', [ $this, 'get_final_price' ], 999, 2 );
+function funncoba_schedule_price_batch_once() {
+
+    // Only run once
+    if ( get_option( 'funncoba_batch_scheduled' ) ) {
+        return;
     }
 
-    public function get_regular_price( $price, $product ) {
-        $currency = funncoba_get_currency_for_user();
-        $custom = get_post_meta( $product->get_id(), "_funncoba_regular_price_{$currency}", true );
-        return $custom !== '' ? (float) $custom : (float) $price;
+    require_once plugin_dir_path( __FILE__ ) . 'includes/class-funncoba-price-batch.php';
+
+    if ( class_exists( '\FunnelWheel\CountryBasedPricing\FUNNCOBA_Price_Batch' ) ) {
+        FUNNCOBA_Price_Batch::schedule();
+        update_option( 'funncoba_batch_scheduled', 1 );
     }
-
-    public function get_sale_price( $price, $product ) {
-        $currency = funncoba_get_currency_for_user();
-        $custom = get_post_meta( $product->get_id(), "_funncoba_sale_price_{$currency}", true );
-        return $custom !== '' ? (float) $custom : null;
-    }
-
-    public function get_final_price( $price, $product ) {
-        $regular = $this->get_regular_price( $product->get_regular_price(), $product );
-        $sale    = $this->get_sale_price( $product->get_sale_price(), $product );
-
-        $final_price = ($sale !== null && $sale < $regular) ? $sale : $regular;
-
-        // Apply country-specific discount
-        $country = FUNNCOBA_Country_Helper::get_user_country();
-        $discounts = get_option( 'funncoba_country_discounts', [] );
-
-        foreach ( $discounts as $rule ) {
-            if ( isset( $rule['country'], $rule['type'], $rule['amount'] ) && $rule['country'] === $country ) {
-                $amount = floatval( $rule['amount'] );
-                if ( $rule['type'] === 'percent' ) {
-                    $final_price -= ($final_price * $amount / 100);
-                } else {
-                    $final_price -= $amount;
-                }
-                $final_price = max( 0, $final_price );
-                break;
-            }
-        }
-
-        return $final_price;
-    }
-
 }
 
 
-register_activation_hook( __FILE__, __NAMESPACE__ . '\\funncoba_set_default_geolocation' );
+add_action( 'init', function() {
+
+    $next = as_next_scheduled_action(
+        'funncoba_process_price_batch',
+        [],
+        'funncoba_price_batch'
+    );
+
+});
+
+add_action( 'admin_init', function () {
+
+    if ( ! current_user_can( 'manage_options' ) ) {
+        return;
+    }
+
+    if ( ! isset( $_GET['funncoba_run_batch'], $_GET['_wpnonce'] ) ) {
+        return;
+    }
+
+    if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_GET['_wpnonce'] ) ), 'funncoba_run_batch' ) ) {
+        wp_die( esc_html__( 'Invalid nonce.', 'funnelwheel-country-based-pricing' ) );
+    }
+
+    require_once plugin_dir_path( __FILE__ ) . 'includes/class-funncoba-price-batch.php';
+
+    FUNNCOBA_Price_Batch::process_batch( 0, time() );
+
+    wp_die( esc_html__( 'Funncoba batch started manually.', 'funnelwheel-country-based-pricing' ) );
+});
+
+
 
 function funncoba_set_default_geolocation() {
     $current = get_option( 'woocommerce_default_customer_address', '' );
@@ -221,35 +230,120 @@ function funncoba_add_country_specific_prices() {
 
         // Regular Price
         echo '<p class="form-field">';
-        echo '<label for="_funncoba_regular_price_' . esc_attr( $currency_code ) . '">' .
-             sprintf( __( 'Regular price (%s)', 'funnelwheel-country-based-pricing' ), esc_html( $currency_symbol ) ) .
-             '</label>';
-        echo '<input type="text" class="short" name="_funncoba_regular_price_' . esc_attr( $currency_code ) . '" id="_funncoba_regular_price_' . esc_attr( $currency_code ) . '" value="' . esc_attr( $regular_price ) . '" />';
+        echo '<label for="_funncoba_regular_price_' . esc_attr( $currency_code ) . '">';
+        echo esc_html(
+            sprintf(
+                /* translators: %s: currency symbol */
+                __( 'Regular price (%s)', 'funnelwheel-country-based-pricing' ),
+                $currency_symbol
+            )
+        );
+        echo '</label>';
+        echo '<input
+            type="number"
+            class="short"
+            step="0.01"
+            min="0"
+            name="_funncoba_regular_price_' . esc_attr( $currency_code ) . '"
+            id="_funncoba_regular_price_' . esc_attr( $currency_code ) . '"
+            value="' . esc_attr( $regular_price ) . '"
+        />';
         echo '</p>';
 
         // Sale Price
         echo '<p class="form-field">';
-        echo '<label for="_funncoba_sale_price_' . esc_attr( $currency_code ) . '">' .
-             sprintf( __( 'Sale price (%s)', 'funnelwheel-country-based-pricing' ), esc_html( $currency_symbol ) ) .
-             '</label>';
-        echo '<input type="text" class="short" name="_funncoba_sale_price_' . esc_attr( $currency_code ) . '" id="_funncoba_sale_price_' . esc_attr( $currency_code ) . '" value="' . esc_attr( $sale_price ) . '" />';
+        echo '<label for="_funncoba_sale_price_' . esc_attr( $currency_code ) . '">';
+        echo esc_html(
+            sprintf(
+                /* translators: %s: currency symbol */
+                __( 'Sale price (%s)', 'funnelwheel-country-based-pricing' ),
+                $currency_symbol
+            )
+        );
+        echo '</label>';
+        echo '<input
+            type="number"
+            class="short"
+            step="0.01"
+            min="0"
+            name="_funncoba_sale_price_' . esc_attr( $currency_code ) . '"
+            id="_funncoba_sale_price_' . esc_attr( $currency_code ) . '"
+            value="' . esc_attr( $sale_price ) . '"
+        />';
         echo '</p>';
+
+
+
     }
 
     echo '</div>';
 }
 
+add_action(
+    'woocommerce_admin_process_product_object',
+    __NAMESPACE__ . '\\funncoba_save_country_specific_prices'
+);
 
-add_action( 'woocommerce_admin_process_product_object', __NAMESPACE__ . '\\funncoba_save_country_specific_prices' );
 function funncoba_save_country_specific_prices( $product ) {
+
+    $base_currency = strtoupper( get_option( 'woocommerce_currency' ) );
+
+    // True base prices (no filters, no country pricing involved)
+    $base_regular = (float) $product->get_meta( '_regular_price', true );
+    $base_sale    = (float) $product->get_meta( '_sale_price', true );
+
     foreach ( funncoba_supported_countries() as $code => $label ) {
-        $currency = FUNNCOBA_Country_Helper::get_currency_by_country( $code );
+
+        $target_currency = FUNNCOBA_Country_Helper::get_currency_by_country( $code );
+        if ( ! $target_currency ) {
+            continue;
+        }
 
         foreach ( [ 'regular', 'sale' ] as $type ) {
-            $key = "_funncoba_{$type}_price_{$currency}";
-            if ( isset( $_POST[ $key ] ) ) {
-                $product->update_meta_data( $key, wc_clean( wp_unslash( $_POST[ $key ] ) ) );
+
+            $key = "_funncoba_{$type}_price_{$target_currency}";
+
+            // 1️⃣ Admin input (if any)
+            $raw_post_value = filter_input( INPUT_POST, $key, FILTER_UNSAFE_RAW );
+
+            if ( $raw_post_value !== null && $raw_post_value !== '' ) {
+
+                // Admin explicitly entered value
+                $value = max(
+                    0,
+                    (float) wc_clean( wp_unslash( $raw_post_value ) )
+                );
+
+            } else {
+
+                // 2️⃣ No admin input → check if already calculated earlier
+                $existing = $product->get_meta( $key, true );
+
+                if ( $existing !== '' ) {
+                    // Already exists → DO NOT recalculate
+                    continue;
+                }
+
+                // 3️⃣ Meta missing → auto-calculate ONCE
+                if ( 'regular' === $type ) {
+                    $source_price = $base_regular;
+                } else {
+                    $source_price = $base_sale ?: $base_regular;
+                }
+
+                if ( $source_price <= 0 ) {
+                    continue;
+                }
+
+                $value = FUNNCOBA_Currency_Rates::convert(
+                    $source_price,
+                    $base_currency,
+                    $target_currency
+                );
             }
+
+            // 4️⃣ Persist final value
+            $product->update_meta_data( $key, (float) $value );
         }
     }
 }
@@ -263,12 +357,16 @@ function funncoba_save_country_specific_prices( $product ) {
 add_filter( 'woocommerce_currency', __NAMESPACE__ . '\\funncoba_dynamic_currency' );
 function funncoba_dynamic_currency( $currency ) {
     static $running = false;
+
+    // Prevent recursion
     if ( $running ) {
         return $currency;
     }
+
     $running = true;
 
-    if ( is_admin() ) {
+    // 🔒 Do NOT change currency in admin or AJAX
+    if ( is_admin() || wp_doing_ajax() ) {
         $running = false;
         return $currency;
     }
@@ -294,11 +392,16 @@ function funncoba_footer_country_selector() {
     if ( empty( $countries ) ) return;
 
     $current_country = FUNNCOBA_Country_Helper::get_user_country();
+
+    // PHPCS-compliant: use filter_input() for $_SERVER['REQUEST_URI']
+    $action_url = filter_input(INPUT_SERVER, 'REQUEST_URI', FILTER_UNSAFE_RAW);
+    $action_url = $action_url ? wp_unslash($action_url) : '';
+    $action_url = esc_url($action_url);
     ?>
 
     <div class="funncoba-footer-bar">
         <div class="funncoba-country-selector">
-            <form method="post" id="funncoba_country_form_footer" action="<?php echo esc_url( $_SERVER['REQUEST_URI'] ); ?>" style="margin:0;">
+            <form method="post" id="funncoba_country_form_footer" action="<?php echo esc_url( filter_input(INPUT_SERVER, 'REQUEST_URI', FILTER_UNSAFE_RAW) ? wp_unslash( filter_input(INPUT_SERVER, 'REQUEST_URI', FILTER_UNSAFE_RAW) ) : '' ); ?>" style="margin:0;">
                 <select name="funncoba_country" id="funncoba_country_footer">
                     <?php foreach ( $countries as $code => $label ) :
                         $curr = FUNNCOBA_Country_Helper::get_currency_by_country( $code );
@@ -315,6 +418,7 @@ function funncoba_footer_country_selector() {
     </div>
     <?php
 }
+
 
 /**
  * Update header mini-cart via AJAX after add-to-cart.

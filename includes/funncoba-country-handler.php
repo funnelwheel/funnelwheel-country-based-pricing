@@ -41,8 +41,12 @@ function funncoba_handle_country_selection() {
         // Determine where to redirect
         $referer = wp_get_referer();
         $current_url = ! empty( $referer )
-            ? $referer
-            : ( ! empty( $_SERVER['REQUEST_URI'] ) ? esc_url_raw( $_SERVER['REQUEST_URI'] ) : home_url() );
+        ? $referer
+        : ( ! empty( $_SERVER['REQUEST_URI'] )
+            ? esc_url_raw( wp_unslash( $_SERVER['REQUEST_URI'] ) )
+            : home_url()
+        );
+
 
         // Remove WooCommerce cache-busting query vars like ?v=xxxx
         $redirect_url = remove_query_arg( [ 'v' ], $current_url );
