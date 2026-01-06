@@ -36,15 +36,27 @@ function funncoba_init() {
 
     // Core helpers (safe early)
     require_once plugin_dir_path( __FILE__ ) . 'includes/class-funncoba-main.php';
+    require_once plugin_dir_path( __FILE__ ) . 'includes/class-funncoba-admin-pricing.php';
     require_once plugin_dir_path( __FILE__ ) . 'includes/class-funncoba-country-helper.php';
     require_once plugin_dir_path( __FILE__ ) . 'includes/class-funncoba-currency-rates.php';
     require_once plugin_dir_path( __FILE__ ) . 'includes/funncoba-country-handler.php';
 
     // Delay batch + main logic until WooCommerce is ready
     add_action( 'woocommerce_loaded', __NAMESPACE__ . '\\funncoba_boot_after_wc', 20 );
+    register_hooks();
+}
+
+/**
+ * -------------------------------------------------
+ * REGISTER HOOKS
+ * -------------------------------------------------
+ */
+function register_hooks() {
 
     // Initialize main class
     new FUNNCOBA_Main();
+
+    FUNNCOBA_Admin_Pricing::init();
 }
 
 function funncoba_boot_after_wc() {
@@ -185,9 +197,10 @@ function funncoba_get_currency_for_user() {
 }
 
 /**
- * Get only enabled/supported currencies.
+ * Get only enabled/supported countries, always including the base country.
  */
 function funncoba_supported_countries() {
+
     $enabled = get_option( 'funncoba_enabled_countries', [] );
 
     if ( empty( $enabled ) ) {
@@ -197,169 +210,20 @@ function funncoba_supported_countries() {
     $wc_countries = \WC()->countries->get_countries();
     $countries = [];
 
-    foreach ( $enabled as $code ) {
+    // Get WooCommerce base country
+    $base_location = wc_get_base_location();
+    $base_country  = $base_location['country'] ?? '';
+
+    // Merge enabled countries + base country
+    $all_codes = array_unique( array_merge( $enabled, [ $base_country ] ) );
+
+    foreach ( $all_codes as $code ) {
         $countries[ $code ] = $wc_countries[ $code ] ?? $code;
     }
 
     return $countries;
 }
 
-add_action( 'woocommerce_product_options_pricing', __NAMESPACE__ . '\\funncoba_add_country_specific_prices' );
-function funncoba_add_country_specific_prices() {
-    $countries = funncoba_supported_countries();
-
-    if ( empty( $countries ) ) {
-        return; // nothing to show
-    }
-
-    $base_currency = get_option( 'woocommerce_currency' );
-
-    echo '<div class="options_group funncoba_country_specific_prices">';
-    echo '<h2>' . esc_html__( 'Country-specific prices', 'funnelwheel-country-based-pricing' ) . '</h2>';
-
-    foreach ( $countries as $code => $label ) {
-
-        $currency_code = FUNNCOBA_Country_Helper::get_currency_by_country( $code );
-
-        // 🚫 Skip base currency completely
-        if ( ! $currency_code || $currency_code === $base_currency ) {
-            continue;
-        }
-
-        $currency_symbol = FUNNCOBA_Country_Helper::get_currency_symbol_by_country( $code );
-
-        // Skip countries with no currency symbol
-        if ( empty( $currency_symbol ) ) {
-            continue;
-        }
-
-        $regular_price = get_post_meta(
-            get_the_ID(),
-            "_funncoba_regular_price_{$currency_code}",
-            true
-        );
-
-        $sale_price = get_post_meta(
-            get_the_ID(),
-            "_funncoba_sale_price_{$currency_code}",
-            true
-        );
-
-        // Regular Price
-        echo '<p class="form-field">';
-        echo '<label for="_funncoba_regular_price_' . esc_attr( $currency_code ) . '">';
-        echo esc_html(
-            sprintf(
-                __( 'Regular price (%s)', 'funnelwheel-country-based-pricing' ),
-                $currency_symbol
-            )
-        );
-        echo '</label>';
-        echo '<input
-            type="number"
-            class="short"
-            step="0.01"
-            min="0"
-            name="_funncoba_regular_price_' . esc_attr( $currency_code ) . '"
-            id="_funncoba_regular_price_' . esc_attr( $currency_code ) . '"
-            value="' . esc_attr( $regular_price ) . '"
-        />';
-        echo '</p>';
-
-        // Sale Price
-        echo '<p class="form-field">';
-        echo '<label for="_funncoba_sale_price_' . esc_attr( $currency_code ) . '">';
-        echo esc_html(
-            sprintf(
-                __( 'Sale price (%s)', 'funnelwheel-country-based-pricing' ),
-                $currency_symbol
-            )
-        );
-        echo '</label>';
-        echo '<input
-            type="number"
-            class="short"
-            step="0.01"
-            min="0"
-            name="_funncoba_sale_price_' . esc_attr( $currency_code ) . '"
-            id="_funncoba_sale_price_' . esc_attr( $currency_code ) . '"
-            value="' . esc_attr( $sale_price ) . '"
-        />';
-        echo '</p>';
-    }
-
-    echo '</div>';
-}
-
-
-add_action(
-    'woocommerce_admin_process_product_object',
-    __NAMESPACE__ . '\\funncoba_save_country_specific_prices'
-);
-
-function funncoba_save_country_specific_prices( $product ) {
-
-    $base_currency = strtoupper( get_option( 'woocommerce_currency' ) );
-
-    // True base prices (no filters, no country pricing involved)
-    $base_regular = (float) $product->get_meta( '_regular_price', true );
-    $base_sale    = (float) $product->get_meta( '_sale_price', true );
-
-    foreach ( funncoba_supported_countries() as $code => $label ) {
-
-        $target_currency = FUNNCOBA_Country_Helper::get_currency_by_country( $code );
-        if ( ! $target_currency ) {
-            continue;
-        }
-
-        foreach ( [ 'regular', 'sale' ] as $type ) {
-
-            $key = "_funncoba_{$type}_price_{$target_currency}";
-
-            // 1️⃣ Admin input (if any)
-            $raw_post_value = filter_input( INPUT_POST, $key, FILTER_UNSAFE_RAW );
-
-            if ( $raw_post_value !== null && $raw_post_value !== '' ) {
-
-                // Admin explicitly entered value
-                $value = max(
-                    0,
-                    (float) wc_clean( wp_unslash( $raw_post_value ) )
-                );
-
-            } else {
-
-                // 2️⃣ No admin input → check if already calculated earlier
-                $existing = $product->get_meta( $key, true );
-
-                if ( $existing !== '' ) {
-                    // Already exists → DO NOT recalculate
-                    continue;
-                }
-
-                // 3️⃣ Meta missing → auto-calculate ONCE
-                if ( 'regular' === $type ) {
-                    $source_price = $base_regular;
-                } else {
-                    $source_price = $base_sale ?: $base_regular;
-                }
-
-                if ( $source_price <= 0 ) {
-                    continue;
-                }
-
-                $value = FUNNCOBA_Currency_Rates::convert(
-                    $source_price,
-                    $base_currency,
-                    $target_currency
-                );
-            }
-
-            // 4️⃣ Persist final value
-            $product->update_meta_data( $key, (float) $value );
-        }
-    }
-}
 
 
 /**
@@ -466,3 +330,122 @@ add_filter( 'woocommerce_add_to_cart_fragments', function( $fragments ) {
 
     return $fragments;
 });
+
+add_filter( 'woocommerce_available_payment_gateways', __NAMESPACE__ . '\\funncoba_filter_gateways_by_country_currency', 99 );
+
+function funncoba_filter_gateways_by_country_currency( $available_gateways ) {
+
+    // Do not interfere in admin (except AJAX)
+    if ( is_admin() && ! wp_doing_ajax() ) {
+        return $available_gateways;
+    }
+
+
+    $customer_country  = WC()->customer->get_billing_country() ?: WC()->customer->get_shipping_country();
+    $customer_currency = get_woocommerce_currency();
+
+    foreach ( $available_gateways as $gateway_id => $gateway ) {
+
+        // ✅ Get gateway settings
+        $allowed_countries  = ! empty( $gateway->get_option( 'funncoba_allowed_countries' ) ) 
+                              ? (array) $gateway->get_option( 'funncoba_allowed_countries' ) 
+                              : [];
+        $excluded_countries = ! empty( $gateway->get_option( 'funncoba_excluded_countries' ) ) 
+                              ? (array) $gateway->get_option( 'funncoba_excluded_countries' ) 
+                              : [];
+        $allowed_currencies  = ! empty( $gateway->get_option( 'funncoba_allowed_currencies' ) ) 
+                              ? (array) $gateway->get_option( 'funncoba_allowed_currencies' ) 
+                              : [];
+        $excluded_currencies = ! empty( $gateway->get_option( 'funncoba_excluded_currencies' ) ) 
+                              ? (array) $gateway->get_option( 'funncoba_excluded_currencies' ) 
+                              : [];
+
+        // --- COUNTRY LOGIC ---
+        if ( ! empty( $allowed_countries ) && ! in_array( $customer_country, $allowed_countries, true ) ) {
+            unset( $available_gateways[ $gateway_id ] );
+            continue;
+        }
+
+        if ( empty( $allowed_countries ) && in_array( $customer_country, $excluded_countries, true ) ) {
+            unset( $available_gateways[ $gateway_id ] );
+            continue;
+        }
+
+        // --- CURRENCY LOGIC ---
+        if ( ! empty( $allowed_currencies ) && ! in_array( $customer_currency, $allowed_currencies, true ) ) {
+            unset( $available_gateways[ $gateway_id ] );
+            continue;
+        }
+
+        if ( empty( $allowed_currencies ) && in_array( $customer_currency, $excluded_currencies, true ) ) {
+            unset( $available_gateways[ $gateway_id ] );
+            continue;
+        }
+    }
+
+    return $available_gateways;
+}
+
+
+
+
+add_action( 'init', __NAMESPACE__ . '\\funncoba_register_gateway_exclusion_fields', 20 );
+
+function funncoba_register_gateway_exclusion_fields() {
+
+    if ( ! class_exists( 'WC_Payment_Gateways' ) || ! WC()->payment_gateways ) {
+        return;
+    }
+
+    foreach ( WC()->payment_gateways->payment_gateways() as $gateway_id => $gateway ) {
+
+        add_filter(
+            "woocommerce_settings_api_form_fields_{$gateway_id}",
+            __NAMESPACE__ . '\\funncoba_add_exclusion_fields'
+        );
+    }
+}
+
+function funncoba_add_exclusion_fields( $fields ) {
+
+    // ✅ Include list
+    $fields['funncoba_allowed_countries'] = [
+        'title'       => __( 'Allowed Countries', 'funnelwheel-country-based-pricing' ),
+        'type'        => 'multiselect',
+        'class'       => 'wc-enhanced-select',
+        'options'     => WC()->countries->get_countries(),
+        'description' => __( 'Gateway will be available only for selected countries. Leave empty to allow all.', 'funnelwheel-country-based-pricing' ),
+        'desc_tip'    => true,
+    ];
+
+    // ✅ Exclude list
+    $fields['funncoba_excluded_countries'] = [
+        'title'       => __( 'Excluded Countries', 'funnelwheel-country-based-pricing' ),
+        'type'        => 'multiselect',
+        'class'       => 'wc-enhanced-select',
+        'options'     => WC()->countries->get_countries(),
+        'description' => __( 'Disable this payment method for selected countries. Ignored if Allowed Countries is set.', 'funnelwheel-country-based-pricing' ),
+        'desc_tip'    => true,
+    ];
+
+    // ✅ Include & Exclude currencies
+    $fields['funncoba_allowed_currencies'] = [
+        'title'       => __( 'Allowed Currencies', 'funnelwheel-country-based-pricing' ),
+        'type'        => 'multiselect',
+        'class'       => 'wc-enhanced-select',
+        'options'     => get_woocommerce_currencies(),
+        'description' => __( 'Gateway will be available only for selected currencies. Leave empty to allow all.', 'funnelwheel-country-based-pricing' ),
+        'desc_tip'    => true,
+    ];
+
+    $fields['funncoba_excluded_currencies'] = [
+        'title'       => __( 'Excluded Currencies', 'funnelwheel-country-based-pricing' ),
+        'type'        => 'multiselect',
+        'class'       => 'wc-enhanced-select',
+        'options'     => get_woocommerce_currencies(),
+        'description' => __( 'Disable this payment method for selected currencies. Ignored if Allowed Currencies is set.', 'funnelwheel-country-based-pricing' ),
+        'desc_tip'    => true,
+    ];
+
+    return $fields;
+}

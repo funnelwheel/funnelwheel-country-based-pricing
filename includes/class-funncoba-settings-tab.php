@@ -76,8 +76,17 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
             $enabled_countries = [];
         }
 
+        // Get WooCommerce base country
+        $base_location = wc_get_base_location();
+        $base_country  = $base_location['country'] ?? '';
+
         $all_countries = FUNNCOBA_Country_Helper::get_country_map();
         $countries = array_intersect_key( $all_countries, array_flip($enabled_countries) );
+
+        // 🚫 Remove base country
+        if ( isset( $countries[ $base_country ] ) ) {
+            unset( $countries[ $base_country ] );
+        }
 
         $discount_types = [
             'amount'  => esc_html__( 'Amount', 'funnelwheel-country-based-pricing' ),
@@ -104,6 +113,7 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
 
             echo '<tr>';
             echo '<td><select name="funncoba_country_discounts[' . esc_attr( $index ) . '][country]">';
+            echo '<option value="">' . esc_html__( 'Select country', 'funnelwheel-country-based-pricing' ) . '</option>';
             foreach ( $countries as $code => $data ) {
                 $label = $data['name'] ?? $code;
                 printf(
@@ -239,18 +249,24 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
             </th>
             <td>
                 <div class="funncoba-batch-box">
+                    <!-- Red warning -->
+                    <p style="color: #a00; font-weight: bold;">
+                        ⚠ <?php esc_html_e( 'Warning: This will update all product prices in the database!', 'funnelwheel-country-based-pricing' ); ?>
+                    </p>
+
                     <p>
                         <?php echo esc_html( $option['desc'] ); ?>
                     </p>
 
                     <a href="<?php echo esc_url( $url ); ?>"
-                       class="button button-primary funncoba-run-batch">
+                       class="button button-primary funncoba-run-batch"
+                       onclick="return confirm('<?php echo esc_js( __( 'Are you sure you want to run the price batch? This will update the database for all products.', 'funnelwheel-country-based-pricing' ) ); ?>');">
                         🔄 <?php esc_html_e( 'Run Price Batch', 'funnelwheel-country-based-pricing' ); ?>
                     </a>
 
                     <p class="description">
                         <?php esc_html_e(
-                            'This will generate or update country prices for all products. You can safely run this multiple times.',
+                            'You can safely run this multiple times. It will update country-specific prices for all products.',
                             'funnelwheel-country-based-pricing'
                         ); ?>
                     </p>
@@ -260,10 +276,11 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
 
         <style>
             .funncoba-batch-box {
-                background: #fff;
-                border: 1px solid #ccd0d4;
+                background: #fff0f0; /* light red background for warning */
+                border: 1px solid #cc0000; /* red border */
                 padding: 16px;
                 max-width: 520px;
+                border-radius: 4px;
             }
 
             .funncoba-run-batch {
@@ -272,6 +289,7 @@ class FUNNCOBA_Settings_Tab extends \WC_Settings_Page {
         </style>
         <?php
     }
+
 
 }
 

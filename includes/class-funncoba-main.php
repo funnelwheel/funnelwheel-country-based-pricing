@@ -73,7 +73,7 @@ class FUNNCOBA_Main {
     }
 
     /**
-     * Final price logic
+     * Final price logic with country-specific discounts
      */
     public function get_final_price( $price, $product ) {
 
@@ -82,6 +82,7 @@ class FUNNCOBA_Main {
             return $price;
         }
 
+        // Get regular price
         $regular = $this->get_regular_price(
             $product->get_regular_price(),
             $product
@@ -92,17 +93,37 @@ class FUNNCOBA_Main {
             return '';
         }
 
+        // Get sale price if exists
         $sale = $this->get_sale_price(
             $product->get_sale_price(),
             $product
         );
 
-        if ( $sale !== '' && $sale < $regular ) {
-            return $sale;
+        // Determine initial final price
+        $final_price = ($sale !== '' && $sale < $regular) ? $sale : $regular;
+
+        // Apply country-specific discount
+        $country = FUNNCOBA_Country_Helper::get_user_country();
+        $discounts = get_option( 'funncoba_country_discounts', [] );
+
+        foreach ( $discounts as $rule ) {
+            if ( isset( $rule['country'], $rule['type'], $rule['amount'] ) && $rule['country'] === $country ) {
+                $amount = floatval( $rule['amount'] );
+
+                if ( $rule['type'] === 'percent' ) {
+                    $final_price -= ( $final_price * $amount / 100 );
+                } else { // amount
+                    $final_price -= $amount;
+                }
+
+                $final_price = max( 0, $final_price ); // prevent negative prices
+                break; // stop after first matching rule
+            }
         }
 
-        return $regular;
+        return $final_price;
     }
+
 
     /**
      * 🔒 Absolute safety: block purchase if meta missing
